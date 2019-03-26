@@ -1,11 +1,7 @@
 """Do decompressing comprressed file."""
 
-import gzip
 import os
-import rarfile
 import sys
-import tarfile
-import zipfile
 
 
 class Decompress(object):
@@ -15,13 +11,14 @@ class Decompress(object):
         """Init class."""
         self.infile = infile
         self.outpath = outpath
-        if os.path.isfile(infile):
+        if not os.path.isfile(infile):
             raise ValueError("Can not find this file %s!", infile)
 
     def un_gz(self, infile, outfile):
         """Decompress gzip file."""
+        import gzip
         g_file = gzip.GzipFile(infile)
-        with open(outfile, 'w+') as wt:
+        with open(outfile, 'wb+') as wt:
             wt.write(g_file.read())
 
     @staticmethod
@@ -32,6 +29,7 @@ class Decompress(object):
 
     def un_tar(self, file_name, outdir):
         """Untar zip file."""
+        import tarfile
         tar = tarfile.open(file_name)
         names = tar.getnames()
         self.makedirs(outdir)
@@ -41,6 +39,7 @@ class Decompress(object):
 
     def un_zip(self, file_name, outdir):
         """Unzip zip file."""
+        import zipfile
         zip_file = zipfile.ZipFile(file_name)
         self.makedirs(outdir)
         for names in zip_file.namelist():
@@ -49,6 +48,7 @@ class Decompress(object):
 
     def un_rar(self, file_name, outdir):
         """Unrar zip file."""
+        import rarfile
         nowdir = os.getcwd()
         try:
             rar = rarfile.RarFile(file_name)
