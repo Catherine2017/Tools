@@ -7,8 +7,17 @@
 ```
 python ./Dir_File/decompress.py infile outpath
 ```
+3. 备注：目前仅支持解压\*.tar.gz, \*.gz, \*.zip, \*.tar, \*.rar文件。
 
 ### 测试压缩文件完整性
+1. 脚本路径：`./Dir_File/check_compress.py`
+2. 使用方法：
+```
+CheckCompress:
+    check: 检查压缩文件。
+```
+3. 备注：目前仅支持检查\*.gz, \*.zip文件。
+
 ### 检查文件md5或者生成文件md5
 1. 脚本路径：`./Dir_File/file_md5.py`
 2. 使用方法：

@@ -61,6 +61,9 @@ class Decompress(object):
 
     def decompress(self):
         """Decompress."""
+        func = {'.gz': 'un_gz', '.tar': 'un_tar', '.zip': 'un_zip',
+                '.rar': 'un_rar'}
+        file_ext = os.path.splitext(self.infile)[1]
         if self.infile.endswith('.tar.gz'):
             tempfile = os.path.join(self.outpath, 'tempfile.tmp.tar')
             self.un_gz(self.infile, tempfile)
@@ -68,14 +71,8 @@ class Decompress(object):
                 self.un_tar(tempfile, self.outpath)
             finally:
                 os.remove(tempfile)
-        elif self.infile.endswith('.gz'):
-            self.un_gz(self.infile, self.outpath)
-        elif self.infile.endswith('.tar'):
-            self.un_tar(self.infile, self.outpath)
-        elif self.infile.endswith('.zip'):
-            self.un_zip(self.infile, self.outpath)
-        elif self.infile.endswith('.rar'):
-            self.un_rar(self.infile, self.outpath)
+        elif file_ext in func:
+            getattr(self, func[file_ext])(self.infile, self.outpath)
         else:
             raise ValueError("Can not find decompress method for %s!",
                              self.infile)

@@ -15,7 +15,13 @@ class CheckCompress(object):
 
     def check(self):
         """Check compressed file."""
-        pass
+        func = {'.gz': 'check_gzip', '.zip': 'check_zip'}
+        file_ext = os.path.splitext(self.infile)[1]
+        if file_ext in func:
+            getattr(self, func[file_ext])()
+        else:
+            raise ValueError("Can not find check compressed method for %s!",
+                             self.infile)
 
     def check_zip(self):
         """Unzip -t file."""
@@ -29,9 +35,10 @@ class CheckCompress(object):
 
     def check_gzip(self):
         """Gzip -t file."""
+        ret = True
         try:
             subprocess.check_call('gzip -t %s' % self.infile, shell=True)
         except subprocess.CalledProcessError as callerror:
-            if callerror.returncode > 1:
-                return False
-        return True
+            if callerror.returncode != 2:
+                ret = False
+        return ret
