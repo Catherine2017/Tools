@@ -27,3 +27,17 @@ FileMD5:
     write_md5: 将MD5信息输出到文件。
 md5sum: 检查文件的MD5是否和md5文件一致。
 ```
+### 忽略“Ignore Gzip Trailing Garbage Data in Python”这种错误
+1. 脚本路径：`./Dir_File/altgzip.py`
+2. 使用方法：
+```
+>>> import altgzip
+>>> with altgzip.AltGzipFile('trailing-garbage.gz') as gz:
+...     data = gz.read()
+...
+decompression OK, trailing garbage ignored
+>>> len(data)
+36
+```
+
+## NGS
