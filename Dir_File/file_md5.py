@@ -25,7 +25,7 @@ class FileMD5(object):
     def write_md5(self, outfile):
         """Write md5 of file to outfile."""
         with open(outfile, 'wt') as wt:
-            wt.write('%s %s' % (self.filepath, self.md5))
+            wt.write('%s  %s' % (self.md5, self.filepath))
 
 
 def md5sum(md5file):
@@ -33,7 +33,7 @@ def md5sum(md5file):
     md5, filename = ('',) * 2
     with open(md5file) as wt:
         for line in wt:
-            md5, filename = line.rstrip(os.linesep).strip().split()[:2]
+            md5, filename = line.rstrip(os.linesep).strip().split('  ')[:2]
             if md5:
                 break
     if not md5:

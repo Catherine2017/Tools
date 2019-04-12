@@ -18,10 +18,11 @@ class CheckCompress(object):
         func = {'.gz': 'check_gzip', '.zip': 'check_zip'}
         file_ext = os.path.splitext(self.infile)[1]
         if file_ext in func:
-            getattr(self, func[file_ext])()
+            ret = getattr(self, func[file_ext])()
         else:
             raise ValueError("Can not find check compressed method for %s!",
                              self.infile)
+        return ret
 
     def check_zip(self):
         """Unzip -t file."""
