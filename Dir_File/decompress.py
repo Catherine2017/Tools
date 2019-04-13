@@ -16,10 +16,11 @@ class Decompress(object):
 
     def un_gz(self, infile, outfile):
         """Decompress gzip file."""
-        import gzip
-        g_file = gzip.GzipFile(infile)
-        with open(outfile, 'wb+') as wt:
-            wt.write(g_file.read())
+        import subprocess
+        try:
+            subprocess.check_call('gunzip -c %s > %s', shell=True)
+        except subprocess.CalledProcessError as e:
+            raise
 
     @staticmethod
     def makedirs(dire):
