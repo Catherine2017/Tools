@@ -37,9 +37,11 @@ class CheckCompress(object):
     def check_gzip(self):
         """Gzip -t file."""
         ret = True
-        try:
-            subprocess.check_call('gzip -t %s' % self.infile, shell=True)
-        except subprocess.CalledProcessError as callerror:
-            if callerror.returncode != 2:
-                ret = False
+        p = subprocess.Popen(
+            ['gzip', '-t', self.infile], stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+        stdout, stderr = p.communicate()
+        if stderr and b'decompression OK, trailing garbage ignored' \
+                not in stderr:
+            ret = False
         return ret
