@@ -66,7 +66,9 @@ class Decompress(object):
                 '.rar': 'un_rar'}
         file_ext = os.path.splitext(self.infile)[1]
         if self.infile.endswith('.tar.gz'):
-            tempfile = os.path.join(self.outpath, 'tempfile.tmp.tar')
+            import uuid
+            tempfile = os.path.join(self.outpath, '%s.tmp.tar' % (
+                uuid.uuid1()))
             self.un_gz(self.infile, tempfile)
             try:
                 self.un_tar(tempfile, self.outpath)
@@ -77,6 +79,7 @@ class Decompress(object):
         else:
             raise ValueError("Can not find decompress method for %s!",
                              self.infile)
+
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
