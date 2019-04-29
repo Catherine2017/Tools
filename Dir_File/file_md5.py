@@ -27,8 +27,15 @@ class FileMD5(object):
         with open(outfile, 'wt') as wt:
             wt.write('%s  %s' % (self.md5, self.filepath))
 
+    def md5check(self, md5):
+        """Check md5 file."""
+        if self.md5 != md5:
+            return False
+        else:
+            return True
 
-def md5sum(md5file):
+
+def md5sum(self, md5file):
     """Md5sum -c file."""
     md5, filename = ('',) * 2
     with open(md5file) as wt:
@@ -38,8 +45,5 @@ def md5sum(md5file):
                 break
     if not md5:
         raise ValueError("Can not find md5 information!")
-    filemd5 = FileMD5(filename).md5
-    if filemd5 != md5:
-        return False
-    else:
-        return True
+    filemd5 = FileMD5(filename)
+    return filemd5.md5check(md5)
