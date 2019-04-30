@@ -1,0 +1,2 @@
+class CheckFastq(object):
+    pass
