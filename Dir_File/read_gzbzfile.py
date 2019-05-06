@@ -2,6 +2,7 @@
 import bz2
 import gzip
 import logging
+import os
 
 
 _logger = logging.getLogger(__name__)
@@ -13,6 +14,8 @@ class ReadGgBz2(object):
     def __init__(self, filename):
         """Init class."""
         self.filename = filename
+        if not os.path.isfile(self.filename):
+            raise ValueError("Can not find file %s!" % self.filename)
         self.handle = None
 
     def __iter__(self):
