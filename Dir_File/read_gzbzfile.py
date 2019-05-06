@@ -1,44 +1,37 @@
 """Read bz2 and gz file."""
 import bz2
 import gzip
-import subprocess
+import logging
+
+
+_logger = logging.getLogger(__name__)
 
 
 class ReadGgBz2(object):
     """Read file if it is gz or bz2 file."""
 
-    def __init__(self, filename, gzippath='gzip', gunzippath='gunzip'):
+    def __init__(self, filename):
         """Init class."""
         self.filename = filename
-        self.gzippath = gzippath
-        self.gunzippath = gunzippath
         self.handle = None
-        if filename.endswith('.gz'):
-            self.handle = gzip.open(filename, 'rt')
-        elif filename.endswith('.bz2'):
-            self.handle = bz2.open(filename, 'rt')
-        else:
-            raise ValueError("File must be gz or bz2 compressed.\n")
 
     def __iter__(self):
         """Read file."""
-        fail_read = True
+        if self.filename.endswith('.gz'):
+            self.handle = gzip.open(self.filename, 'rt')
+        elif self.filename.endswith('.bz2'):
+            self.handle = bz2.open(self.filename, 'rt')
+        else:
+            raise ValueError("File %s must be gz or bz2 compressed.\n" %
+                             self.filename)
+        num = 0
         try:
-            for line in self.handle:
+            for num, line in enumerate(self.handle):
                 yield line
-        except Exception:
-            fail_read = False
+        except (OSError, IOError) as e:  # IOError is needed for 2.7
+            # ignore decompression OK, trailing garbage ignored
+            if num <= 0 or not str(e).startswith('Not a gzipped file'):
+                raise
+            _logger.warn('decompression OK, trailing garbage ignored')
         finally:
             self.handle.close()
-        if fail_read and self.filename.endswith('.gz'):
-            stderr = self.run_cmd([self.gzip, '-t', self.filename])
-            if b'decompression OK, trailing garbage ignored' in stderr:
-                pass
-
-    @staticmethod
-    def run_cmd(args):
-        """Run system."""
-        p = subprocess.Popen(args, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE)
-        stdout, stderr = p.communicate()
-        return stderr
