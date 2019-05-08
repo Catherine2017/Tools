@@ -1,4 +1,10 @@
-"""Get base count and error for fastq file both single end and pair end sequencing."""
+"""
+
+Get base count and error for fastq file both single end and pair end
+sequencing.
+
+"""
+
 from itertools import zip_longest
 import os
 import re
@@ -18,13 +24,13 @@ class CheckFastq(object):
          ' at 4th line [{}]'),
         'The file don\'t have an integral multiple of 4 number of lines']
     pair_errors = [
-        'Read1 name {} is not same with read2 name %s at line [{}]',
+        'Read1 name ({}) is not same with read2 name ({}) at line [{}]',
         'Read1 number is not equal to read2 number.']
 
     def set_value(self, filepath, pair_index):
         """Init value."""
         header = {'base_count': 0, 'read_count': 0, 'error': '',
-                  'line2_len': 0, 'line4_len': 0}
+                  'line2_len': 0, 'line4_len': 0, 'line_count': 0}
         readname = self.pair[pair_index]
         if filepath:
             if not os.path.isfile(filepath):
@@ -36,8 +42,10 @@ class CheckFastq(object):
                 raise ValueError("The fastq file must be given!")
         return filepath
 
-    def read_file(self, read1file, read2file="", read_gzbzfile=""):
+    def read_file(self, read1file, read2file="", read_gzbzfile="./"):
         """Read file."""
+        self.base_count = 0
+        self.read_count = 0
         self.read1file = self.set_value(read1file, 0)
         self.read2file = self.set_value(read2file, 1)
         iter2 = None
@@ -63,17 +71,30 @@ class CheckFastq(object):
                 if iter2 is not None:
                     iter2.close()
 
+    def check_error(self):
+        """Check whether has error."""
+        errorlist = ['read1_error', 'read2_error', 'pair_error']
+        tag = False
+        for tmp in errorlist:
+            if hasattr(self, tmp) and getattr(self, tmp):
+                tag = True
+                break
+        return True
+
     def read_iter(self, iter1, iter2=None):
         """Run function."""
         iter_args = [iter1]
         if iter2 is not None:
-            iter_args.extend(iter2)
+            iter_args.append(iter2)
             self.pair_error = ''
         for i, lines in enumerate(zip_longest(*iter_args)):
             defi = (i + 1) % 4
             if lines:
                 errors = []
                 for j, line in enumerate(lines):
+                    if line is None:
+                        continue
+                    self.__dict__['%s_line_count' % self.pair[j]] += 1
                     length = len(line)
                     error = ''
                     if defi == 1:
@@ -99,23 +120,26 @@ class CheckFastq(object):
                     if error:
                         self.__dict__['%s_error' % self.pair[j]] = error
                         errors.append(error)
-                if any(errors):
-                    return False
-                if len(lines) > 1:
-                    if any(x is None for x in lines):
-                        self.pair_error = self.pair_errors[1]
+                if len([x for x in lines if x is not None]) > 1:
                     if defi == 1:
-                        readnames = [re.sub(r'\w$', '', x.split()[0])
-                                     for x in lines]
+                        origread = [x.split('\t')[0] for x in lines]
+                        readnames = [re.sub(r'\w$', '', x) for x in origread]
                         if len(set(readnames)) != 1:
                             self.pair_error = self.pair_errors[0].format(
-                                readnames[0], readnames[1], i)
-                    if self.pair_error:
-                        return False
-        if (i+1) % 4 != 0:
-            self.read1_error = self.single_errors[3]
-            if iter2 is not None and not self.pair_error:
-                self.read2_error = self.single_errors[3]
+                                origread[0], origread[1], i)
+                if any(errors) or (hasattr(self, 'pair_error') and
+                       self.pair_error):
+                    return False
+        if iter2 is not None:
+            if self.read1_read_count != self.read2_read_count:
+                self.pair_error = self.pair_errors[1]
+        for read in self.pair:
+            key = '%s_line_count' % read
+            if hasattr(self, key):
+                value = getattr(self, key)
+                if value % 4 != 0:
+                    setattr(self, '%s_error' % key, self.single_errors[3])
+        if self.check_error():
             return False
         else:
             total_stat = ['base_count', 'read_count']
@@ -125,3 +149,31 @@ class CheckFastq(object):
                         self.__dict__[astat] += getattr(self, '%s_%s' % (
                             readname, astat))
             return True
+
+
+def test():
+    """Test for module."""
+    if len(sys.argv) < 2:
+        print('Usage: python {0} read1.fq.gz [read2.fq.gz]'.format(
+            sys.argv[0]))
+        sys.exit(0)
+    cf = CheckFastq()
+    cf.read_file(*sys.argv[1:])
+    print('=' * 24)
+    print('-'*6, 'total statistics', '-'*6)
+    print('total base count:', cf.base_count)
+    print('total read count:', cf.read_count)
+    single_info = ['base_count', 'read_count', 'error']
+    for read in cf.pair:
+        print('-'*6, read, 'information', '-'*6)
+        for tmp in single_info:
+            key = '%s_%s' % (read, tmp)
+            if hasattr(cf, key):
+                print('%s:%s' % (key, getattr(cf, key)))
+    if hasattr(cf, 'pair_error'):
+        print('-'*6, 'pair error', '-'*6)
+        print('pair error:', cf.pair_error)
+
+
+if __name__ == '__main__':
+    test()
