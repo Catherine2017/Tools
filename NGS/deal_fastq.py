@@ -14,23 +14,35 @@ import sys
 class CheckFastq(object):
     """Get base count and error for fastq file."""
 
-    base_count = 0
-    read_count = 0
     pair = ['read1', 'read2']
+    phredrange = (33, 105)
+    phredQ = (58, 75)
     single_errors = [
         'The [{}] line:({}) have wrong base',
-        'The [{}] line:({}) is not +',
+        'The [{}] line:({}) is not {}',
         ('The 4th line length {} is not equal to the 2nd line length {}'
          ' at 4th line [{}]'),
-        'The file don\'t have an integral multiple of 4 number of lines']
+        'The file don\'t have an integral multiple of 4 number of lines',
+        'The ord of qualiyty ({0}-{1}) is out of {2[0]}-{2[1]} at line [{3}]']
     pair_errors = [
         'Read1 name ({}) is not same with read2 name ({}) at line [{}]',
         'Read1 number is not equal to read2 number.']
+    readname_normal = re.compile(r'\/[12]$')
+    readname_454 = re.compile(r'\.[fr]$')
+    casava_1_8 = re.compile(
+        r'^@([a-zA-Z0-9_-]+:\d+:[a-zA-Z0-9_-]+:\d+:\d+:[0-9-]+:'
+        '[0-9-]+)\s+([12]):[YN]:\d*[02468]:(([ACGTN]+)|(\d+))$')
+
+    # 参考资料：
+    # https://en.wikipedia.org/wiki/FASTQ_format
+    # https://ena-docs.readthedocs.io/en/latest/format_01.html#other-read-data
+    # https://github.com/nunofonseca/fastq_utils/wiki/FASTQ-validation
 
     def set_value(self, filepath, pair_index):
         """Init value."""
         header = {'base_count': 0, 'read_count': 0, 'error': '',
-                  'line2_len': 0, 'line4_len': 0, 'line_count': 0}
+                  'line2_len': 0, 'line4_len': 0, 'line_count': 0,
+                  'phredq': ""}
         readname = self.pair[pair_index]
         if filepath:
             if not os.path.isfile(filepath):
@@ -46,6 +58,7 @@ class CheckFastq(object):
         """Read file."""
         self.base_count = 0
         self.read_count = 0
+        self.phredq = ""
         self.read1file = self.set_value(read1file, 0)
         self.read2file = self.set_value(read2file, 1)
         iter2 = None
@@ -79,7 +92,14 @@ class CheckFastq(object):
             if hasattr(self, tmp) and getattr(self, tmp):
                 tag = True
                 break
-        return True
+        return tag
+
+    def check_firstword(self, i, line, a):
+        """Check line [0] is a."""
+        error = ""
+        if line[0] != a:
+            error = self.single_errors[1].format(i, line, a)
+        return error
 
     def read_iter(self, iter1, iter2=None):
         """Run function."""
@@ -90,6 +110,8 @@ class CheckFastq(object):
         for i, lines in enumerate(zip_longest(*iter_args)):
             defi = (i + 1) % 4
             if lines:
+                lines_notNone = len([x for x in lines if x is not None])
+                origread, readnames = [], []
                 errors = []
                 for j, line in enumerate(lines):
                     if line is None:
@@ -98,72 +120,121 @@ class CheckFastq(object):
                     length = len(line)
                     error = ''
                     if defi == 1:
+                        # single pair 检查是否“@”开头
+                        error = self.check_firstword(i, line, '@')
                         self.__dict__['%s_line2_len' % self.pair[j]] = 0
                         self.__dict__['%s_line4_len' % self.pair[j]] = 0
+                        if lines_notNone > 1:
+                            origread.append(line)
+                            # 针对某些BGI文件，文件名称如
+                            # “@CL100066606L2C001R002_528666#162_967_615/1
+                            #     1       1”
+                            readnametmp = line.split('\t')[0]
+                            if self.readname_normal.search(readnametmp):
+                                readnames.append(self.readname_normal.sub(
+                                    '', readnametmp))
+                            elif self.readname_454.search(readnametmp):
+                                readnames.append(self.readname_454.sub(
+                                    '', readnametmp))
+                            elif self.casava_1_8.search(readnametmp):
+                                readnames.append(
+                                    re.split(r'\s+', readnametmp)[0])
+                            else:
+                                raise ValueError("New pattern readname:%s!",
+                                                 readnametmp)
                     elif defi == 2:
+                        # 获取每单元碱基长度
                         self.__dict__['%s_line2_len' % self.pair[j]] = length
+                        # 计算read和base数目
                         self.__dict__['%s_read_count' % self.pair[j]] += 1
                         self.__dict__['%s_base_count' % self.pair[j]] += length
                         line = line.upper()
-                        if not set(line).issubset(set('ATCGN')):
+                        # 检查碱基是否为ATCGN，0123针对454测序
+                        if not set(line).issubset(set('ATCGN0123')):
                             error = self.single_errors[0].format(i, line)
                     elif defi == 3:
-                        if line[0] != '+':
-                            error = self.single_errors[1].format(i, line)
+                        # 检查第三行是否为“+”开头
+                        error = self.check_firstword(i, line, '+')
                     elif defi == 0:
+                        # 检查质量值长度是否和碱基长度一致
                         self.__dict__['%s_line4_len' % self.pair[j]] = length
                         line2_len = getattr(
                             self, '%s_line2_len' % self.pair[j])
                         if line2_len != length:
                             error = self.single_errors[2].format(
                                 length, line2_len, i)
+                        # 检查质量值是否在Phred范围33-105
+                        phredset = set(map(ord, line))
+                        amin = min(phredset)
+                        amax = max(phredset)
+                        if amin < self.phredrange[0] or \
+                                amax > self.phredrange[1]:
+                            error = self.single_errors[4].format(
+                                amin, amax, self.phredrange, i)
+                        # 获取质量值体系
+                        phredq = getattr(self, '%s_phredq' % self.pair[j])
+                        if not phredq:
+                            if amin <= self.phredQ[0]:
+                                phredq = '33'
+                            elif amax >= self.phredQ[1]:
+                                phredq = '64'
+                            self.__dict__['%s_phredq' % self.pair[j]] = phredq
                     if error:
                         self.__dict__['%s_error' % self.pair[j]] = error
                         errors.append(error)
-                if len([x for x in lines if x is not None]) > 1:
+                if lines_notNone > 1:
                     if defi == 1:
-                        origread = [x.split('\t')[0] for x in lines]
-                        readnames = [re.sub(r'\w$', '', x) for x in origread]
                         if len(set(readnames)) != 1:
                             self.pair_error = self.pair_errors[0].format(
                                 origread[0], origread[1], i)
                 if any(errors) or (hasattr(self, 'pair_error') and
-                       self.pair_error):
+                                   self.pair_error):
                     return False
         if iter2 is not None:
+            # 检查read1和read2数目是否一致
             if self.read1_read_count != self.read2_read_count:
                 self.pair_error = self.pair_errors[1]
         for read in self.pair:
+            # 检查行数是否为4的倍数
             key = '%s_line_count' % read
             if hasattr(self, key):
-                value = getattr(self, key)
-                if value % 4 != 0:
-                    setattr(self, '%s_error' % key, self.single_errors[3])
+                value = getattr(self, key) % 4
+                if value != 0:
+                    setattr(self, '%s_error' % read, self.single_errors[3])
         if self.check_error():
             return False
         else:
-            total_stat = ['base_count', 'read_count']
+            # 获取总体的统计数据
+            total_stat = ['base_count', 'read_count', 'phredq']
             for astat in total_stat:
                 for readname in self.pair:
-                    if hasattr(self, '%s_%s' % (readname, astat)):
-                        self.__dict__[astat] += getattr(self, '%s_%s' % (
-                            readname, astat))
+                    key = '%s_%s' % (readname, astat)
+                    if hasattr(self, key):
+                        attrtmp = getattr(self, key)
+                        if astat == 'phredq':
+                            if attrtmp:
+                                self.__dict__[astat] = attrtmp
+                        else:
+                            self.__dict__[astat] += attrtmp
             return True
 
 
 def test():
     """Test for module."""
+    import time
     if len(sys.argv) < 2:
         print('Usage: python {0} read1.fq.gz [read2.fq.gz]'.format(
             sys.argv[0]))
         sys.exit(0)
+    print('=' * 24)
+    print('start time:', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
     cf = CheckFastq()
     cf.read_file(*sys.argv[1:])
-    print('=' * 24)
     print('-'*6, 'total statistics', '-'*6)
     print('total base count:', cf.base_count)
     print('total read count:', cf.read_count)
-    single_info = ['base_count', 'read_count', 'error']
+    print('phred range:', cf.phredq)
+    single_info = ['base_count', 'read_count', 'error', 'phredq']
     for read in cf.pair:
         print('-'*6, read, 'information', '-'*6)
         for tmp in single_info:
@@ -173,6 +244,7 @@ def test():
     if hasattr(cf, 'pair_error'):
         print('-'*6, 'pair error', '-'*6)
         print('pair error:', cf.pair_error)
+    print('end time:', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
 
 
 if __name__ == '__main__':
