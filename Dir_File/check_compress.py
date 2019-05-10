@@ -62,5 +62,5 @@ class CheckCompress(object):
         stderr = self.run_cmd([self.bz2path, '-tv', self.infile])
         if stderr and not stderr.endswith(b'ok\n'):
             ret = False
-            self.error = error
+            self.error = stderr
         return ret
