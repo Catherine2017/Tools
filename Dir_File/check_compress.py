@@ -44,13 +44,13 @@ class CheckCompress(object):
         p = subprocess.Popen(args, stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE)
         stdout, stderr = p.communicate()
-        return stderr
+        return stderr.decode('utf-8')
 
     def check_gz(self):
         """Gzip -t file."""
         ret = True
         stderr = self.run_cmd([self.gzippath, '-t', self.infile])
-        if stderr and b'decompression OK, trailing garbage ignored' \
+        if stderr and 'decompression OK, trailing garbage ignored' \
                 not in stderr:
             ret = False
             self.error = stderr
@@ -60,7 +60,7 @@ class CheckCompress(object):
         """Bzip -tv file."""
         ret = True
         stderr = self.run_cmd([self.bz2path, '-tv', self.infile])
-        if stderr and not stderr.endswith(b'ok\n'):
+        if stderr and not stderr.endswith('ok\n'):
             ret = False
             self.error = stderr
         return ret
