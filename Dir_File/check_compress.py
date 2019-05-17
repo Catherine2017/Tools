@@ -44,7 +44,7 @@ class CheckCompress(object):
         p = subprocess.Popen(args, stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE)
         stdout, stderr = p.communicate()
-        return stderr.decode('utf-8')
+        return stderr.decode('utf-8').strip(os.linesep).strip()
 
     def check_gz(self):
         """Gzip -t file."""

@@ -30,6 +30,7 @@ class ReadGgBz2(object):
         num = 0
         try:
             for num, line in enumerate(self.handle):
+                line = line.rstrip(os.linesep)
                 yield line
         except (OSError, IOError) as e:  # IOError is needed for 2.7
             # ignore decompression OK, trailing garbage ignored

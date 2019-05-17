@@ -1,7 +1,6 @@
 """Check md5 of file or generate md5."""
 import hashlib
 import os
-import sys
 
 
 class FileMD5(object):
@@ -36,34 +35,15 @@ class FileMD5(object):
             return True
 
 
-def md5sum(md5file):
+def md5sum(self, md5file):
     """Md5sum -c file."""
     md5, filename = ('',) * 2
-    rt = True
     with open(md5file) as wt:
         for line in wt:
-            line = line.rstrip(os.linesep).strip()
-            if line.startswith("MD5"):
-                filename, md5 = line.split('=')
-                filename = filename.replace('MD5(', '').replace(')', '')
-            else:
-                md5, filename = line.split('  ')[:2]
-            md5 = md5.strip()
-            filename = filename.strip()
-            filemd5 = FileMD5(filename)
-            status = 'FAIL'
-            if filemd5.md5check(md5):
-                status = 'OK'
-            else:
-                rt = False
-            print('%s:%s' % (filename, status))
+            md5, filename = line.rstrip(os.linesep).strip().split('  ')[:2]
+            if md5:
+                break
     if not md5:
         raise ValueError("Can not find md5 information!")
-    return rt
-
-
-if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print('Usage:python {0} md5file\n'.format(sys.argv[0]))
-        sys.exit(0)
-    md5sum(sys.argv[1])
+    filemd5 = FileMD5(filename)
+    return filemd5.md5check(md5)
