@@ -37,7 +37,7 @@ class CheckFastq(object):
     readname_454 = re.compile(r'\.[fr]$')
     casava_1_8 = re.compile(
         r'^@([a-zA-Z0-9_-]+:\d+:[a-zA-Z0-9_-]+:\d+:\d+:[0-9-]+:'
-        '[0-9-]+)\s+([12]):[YN]:\d*[02468]:?([ACGTN\+\d+]*)$')
+        '[0-9-]+)(\s+|\:)([12]):[YN]:\d*[02468]:?([ACGTN\_\+\d+]*)$')
 
     # 参考资料：
     # https://en.wikipedia.org/wiki/FASTQ_format
@@ -159,7 +159,8 @@ class CheckFastq(object):
                             readnames.append(self.readname_454.sub(
                                 '', readnametmp))
                         elif self.casava_1_8.search(readnametmp):
-                            readnames.append(re.split(r'\s+', readnametmp)[0])
+                            match = self.casava_1_8.search(readnametmp)
+                            readnames.append(match.group(1))
                         else:
                             readfile = getattr(self, '%sfile' % self.pair[j])
                             _logger.warning(
