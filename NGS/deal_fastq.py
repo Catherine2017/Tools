@@ -162,10 +162,11 @@ class CheckFastq(object):
                             match = self.casava_1_8.search(readnametmp)
                             readnames.append(match.group(1))
                         else:
-                            readfile = getattr(self, '%sfile' % self.pair[j])
-                            _logger.warning(
-                                "New pattern readname:%s in file:%s!",
-                                readnametmp, readfile)
+                            if i == 0:
+                                readfile = getattr(self, '%sfile' % self.pair[j])
+                                _logger.warning(
+                                    "New pattern readname:%s in file:%s!",
+                                    readnametmp, readfile)
                             readnames.append(readnametmp)
                 elif defi == 2:
                     # 计算read和base数目
