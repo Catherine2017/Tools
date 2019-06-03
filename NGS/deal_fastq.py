@@ -1,287 +1,343 @@
 """
-
-Get base count and error for fastq file both single end and pair end
-sequencing.
-
+Description: Get base count and error for fastq file both single end and pair
+             end sequencing.
 """
 
+from copy import deepcopy
 from itertools import zip_longest
 import logging
 import os
 import re
-import sys
+import time
+
+from read_gzbzfile import ReadGgBz2Normal
 
 _logger = logging.getLogger(__name__)
+errors = {
+    'WB': 'The [{}] line:({}) have wrong base',
+    'NF': 'The [{}] line:({}) is not {}',
+    'DL': ('The 4th line length {} is not equal to the 2nd line length {}'
+           ' at 4th line [{}]'),
+    'OQ': ('The ord of qualiyty ({0[0]}-{0[1]}) is out of {1[0]}-{1[1]} at'
+           ' line [{2}]'),
+    'RN': 'Read1 name ({}) is not same with read2 name ({}) at line [{}]',
+    'FF': "Failed to read file: {}",
+    'N4': r'The file don\'t have an integral multiple of 4 number of lines',
+    'NE': 'Read1 number is not equal to read2 number at line [{}].'}
+
+
+class lazypropery:
+    """Return value if exists."""
+
+    def __init__(self, func):
+        """Init class."""
+        self.func = func
+
+    def __get__(self, instance, cls):
+        """Get function."""
+        if instance is None:
+            return self
+        else:
+            value = self.func(instance)
+            setattr(instance, self.func.__name__, value)
+            return value
+
+
+class SingleRead(object):
+    """Get information for single read."""
+
+    phredrange = (33, 126)
+    phredQ = (58, 75)
+    readname_normal = re.compile(r'(\/[12])|(\.[fr])$')
+    casava_1_8 = re.compile(
+        r'^@([a-zA-Z0-9_-]+:\d+:[a-zA-Z0-9_-]+:\d+:\d+:[0-9-]+:'
+        r'[0-9-]+)(\s+|\:)([12]):[YN]:\d*[02468]:?([ACGTN\_\+\d+]*)$')
+
+    def __init__(self, number: int, lines4: list):
+        """Init class."""
+        # number: start from 0
+        self.readnumber = number
+        self.lines4 = lines4
+
+    @lazypropery
+    def lines_len(self):
+        """Get lines length."""
+        return len(self.lines4)
+
+    @lazypropery
+    def line2_len(self):
+        return len(self.lines4[1])
+
+    @lazypropery
+    def phreds(self):
+        """Get phred for read."""
+        aset = set(map(ord, self.lines4[3]))
+        phred_min = min(aset)
+        phred_max = max(aset)
+        return (phred_min, phred_max)
+
+    @lazypropery
+    def error(self):
+        """Check error."""
+        def check_first(linenum, line, first):
+            if line.startswith(first):
+                return ""
+            else:
+                return errors['NF'].format(linenum, line, first)
+        # 检查是否为4的倍数
+        if self.lines_len != 4:
+            return errors['N4']
+        # 检查第二行是否为ATCG0123
+        if not set(self.lines4[1].upper()).issubset(set('ATGCN0123')):
+            return errors['WB'].format(self.readnumber*4+1, self.lines4[1])
+        # 检查第一行和第三行是否为@或+开头
+        firsts = {0: '@', 2: '+'}
+        for i, first in firsts.items():
+            error = check_first(self.readnumber*4+i, self.lines4[i], first)
+            if error:
+                return error
+        # 检查第二行和第四行是否相等
+        line4_number = self.readnumber*4+3
+        line4_len = len(self.lines4[3])
+        if self.line2_len != line4_len:
+            return errors['DL'].format(self.line2_len, line4_len, line4_number)
+        if self.phreds[0] < self.phredrange[0] or \
+                self.phreds[1] > self.phredrange[1]:
+            return errors['OQ'].format(self.phreds, self.phredrange,
+                                       line4_number)
+        return ""
+
+    @lazypropery
+    def readname(self):
+        """Get read name."""
+        readtmp1 = self.lines4[0].strip().split('\t')[0]
+        if self.readname_normal.search(readtmp1):
+            return self.readname_normal.sub('', readtmp1)
+        pattern = self.casava_1_8.search(readtmp1)
+        if pattern:
+            return pattern.group(1)
+        if self.readnumber == 0:
+            _logger.warning('New readname:%s', self.lines4[0])
+        return readtmp1.split()[0]
+
+    @lazypropery
+    def phreq_set(self):
+        """Get phreq for read."""
+        phreq_set = ''
+        if self.phreds[0] <= self.phredQ[0]:
+            phreq_set = '33'
+        elif self.phreds[1] >= self.phredQ[1]:
+            phreq_set = '64'
+        return phreq_set
+
+    @lazypropery
+    def base_count(self):
+        """Get base count for read."""
+        if self.lines4 is None or self.lines_len != 4:
+            _logger.warning('Wrong base count for line %s!',
+                            self.readnumber*4+1)
+            return 0
+        return self.line2_len
+
+
+class PairRead(object):
+    """Get information for pair read."""
+
+    def __init__(self, number: int, lines1: list, lines2: list):
+        """Init class."""
+        self.number = number
+        self.linenum = self.number*4
+        self.lines1 = lines1
+        self.lines2 = lines2
+        self.read1 = SingleRead(number, lines1)
+        self.read2 = SingleRead(number, lines2)
+
+    @lazypropery
+    def pair_error(self):
+        """Check pair error."""
+        # 检查read1和read2数目是否一致
+        if self.lines1 is None or self.lines2 is None:
+            return errors['NE'].format(self.linenum)
+        # 检查read1和read2的名称是否一致
+        if self.read1.readname != self.read2.readname:
+            return errors['RN'].format(
+                self.read1.readname, self.read2.readname, self.linenum)
+        return ""
+
+
+class HoldSingle(object):
+    """Hold single fastq."""
+
+    def __init__(self):
+        """Init class."""
+        self.error = ''
+        self.phreq_set = ''
+        self.base_count = 0
+        self.read_count = 0
+
+    def add(self, singleread):
+        """Add single read."""
+        self.read_count += 1
+        self.base_count += singleread.base_count
+        if not self.phreq_set:
+            self.phreq_set = singleread.phreq_set
+
+    def check_error(self, singleread):
+        """Check error."""
+        self.error = singleread.error
+        if self.error:
+            return True
+        else:
+            return False
+
+
+class HoldPair(object):
+    """Hold pair read."""
+
+    def __init__(self):
+        """Init class."""
+        self.pair_error = ''
+        self.read1 = HoldSingle()
+        self.read2 = HoldSingle()
+        self.base_count = 0
+        self.read_count = 0
+        self.phreq_set = ""
+
+    def add(self, pairread):
+        """Add pair read."""
+        self.read1.add(pairread.read1)
+        self.read2.add(pairread.read2)
+
+    def cal(self):
+        """Calculate pair read."""
+        self.read_count = self.read1.read_count + self.read2.read_count
+        self.base_count = self.read1.base_count + self.read2.base_count
+        self.phreq_set = self.read1.phreq_set if self.read1.phreq_set else \
+            self.read2.phreq_set
+
+    def check_error(self, pairread):
+        """Check error."""
+        self.pair_error = pairread.pair_error
+        if self.pair_error:
+            return True
+        if self.read1.check_error(pairread.read1):
+            return True
+        if self.read2.check_error(pairread.read2):
+            return True
+        return False
+
+
+class ReadFastq(object):
+    """Read fastq and get read unit."""
+
+    def __init__(self, fastqfile):
+        """Init class."""
+        self.fastqfile = fastqfile
+        if not os.path.isfile(fastqfile):
+            raise ValueError("Can not find file %s!" % fastqfile)
+
+    def __iter__(self):
+        """Get lines."""
+        lines = []
+        try:
+            with ReadGgBz2Normal(self.fastqfile, 'rt') as rg:
+                for line in rg:
+                    line = line.rstrip(os.linesep)
+                    lines.append(line)
+                    if len(lines) >= 4:
+                        yield lines
+                        lines = []
+                if lines:
+                    yield lines
+        except Exception:
+            raise OSError(errors['FF'].format(os.path.basename(
+                self.fastqfile)))
 
 
 class CheckFastq(object):
-    """Get base count and error for fastq file."""
+    """Check fastq file."""
 
-    pair = ['read1', 'read2']
-    compressed = ('.gz', '.bz2')
-    phredrange = (33, 126)
-    phredQ = (58, 75)
-    single_errors = [
-        'The [{}] line:({}) have wrong base',
-        'The [{}] line:({}) is not {}',
-        ('The 4th line length {} is not equal to the 2nd line length {}'
-         ' at 4th line [{}]'),
-        'The file don\'t have an integral multiple of 4 number of lines',
-        'The ord of qualiyty ({0}-{1}) is out of {2[0]}-{2[1]} at line [{3}]',
-        'Failed to read compressed file: {}.',
-        'Failed to deal fastq.']
-    pair_errors = [
-        'Read1 name ({}) is not same with read2 name ({}) at line [{}]',
-        'Read1 number is not equal to read2 number.']
-    readname_normal = re.compile(r'\/[12]$')
-    readname_454 = re.compile(r'\.[fr]$')
-    casava_1_8 = re.compile(
-        r'^@([a-zA-Z0-9_-]+:\d+:[a-zA-Z0-9_-]+:\d+:\d+:[0-9-]+:'
-        '[0-9-]+)(\s+|\:)([12]):[YN]:\d*[02468]:?([ACGTN\_\+\d+]*)$')
+    header = {
+        'base_count': 0, 'read_count': 0, 'phreq_set': '', 'pair_error': '',
+        'file1_read_count': 0, 'file1_base_count': 0, 'file1_error': '',
+        'file2_read_count': 0, 'file2_base_count': 0, 'file2_error': ''}
 
-    # 参考资料：
-    # https://en.wikipedia.org/wiki/FASTQ_format
-    # https://ena-docs.readthedocs.io/en/latest/format_01.html#other-read-data
-    # https://github.com/nunofonseca/fastq_utils/wiki/FASTQ-validation
+    def __init__(self, fastq1, fastq2=None, dofast=10):
+        """Init class."""
+        self.fastq1 = fastq1
+        self.fastq2 = fastq2
+        self._run_fastq(int(dofast))
 
-    def set_value(self, filepath, pair_index):
-        """Init value."""
-        header = {'base_count': 0, 'read_count': 0, 'error': '',
-                  'line2_len': 0, 'line4_len': 0, 'line_count': 0,
-                  'phredq': ""}
-        readname = self.pair[pair_index]
-        if filepath:
-            if not os.path.isfile(filepath):
-                raise ValueError("Can not find file %s!" % filepath)
-            for key, value in header.items():
-                setattr(self, '%s_%s' % (readname, key), value)
+    def _run_fastq(self, dofast):
+        """Run fastq."""
+        file1error = errors['FF'].format(os.path.basename(self.fastq1))
+        iters = [ReadFastq(self.fastq1)]
+        if self.fastq2 is None:
+            self.hold = HoldSingle()
         else:
-            if pair_index == 0:
-                raise ValueError("The fastq file must be given!")
-        return filepath
-
-    def read_file(self, read1file, read2file=""):
-        """Read file."""
-        def read_singlefile(filepath):
-            iterl = None
-            if not filepath:
-                return iterl
-            if filepath.endswith(self.compressed):
-                from read_gzbzfile import ReadGgBz2
-                iterl = ReadGgBz2(filepath)
-            else:
-                iterl = open(filepath, 'rt')
-            return iterl
-
-        def close_singlefile(iterl, filepath):
-            if iterl is not None and not filepath.endswith(self.compressed):
-                iterl.clse()
-
-        self.base_count = 0
-        self.read_count = 0
-        self.phredq = ""
-        self.read1file = self.set_value(read1file, 0)
-        self.read2file = self.set_value(read2file, 1)
-        iter1 = read_singlefile(self.read1file)
-        iter2 = read_singlefile(self.read2file)
-        check = True
+            self.hold = HoldPair()
+            file2error = errors['FF'].format(os.path.basename(self.fastq2))
+            iters.append(ReadFastq(self.fastq2))
         try:
-            check = self.read_iter(iter1, iter2)
-        except Exception as e:
-            _logger.exception(e)
-            self.check_file(self.read1file, 'read1')
-            self.check_file(self.read2file, 'read2')
-            check = False
-        finally:
-            close_singlefile(iter1, self.read1file)
-            close_singlefile(iter2, self.read2file)
-        return check
+            i = 0
+            read = None
+            for tmp in zip_longest(*iters):
+                if len(tmp) == 2:
+                    read = PairRead(i, tmp[0], tmp[1])
+                else:
+                    read = SingleRead(i, tmp[0])
+                self.hold.add(read)
+                i += 1
+                if i == 0 or i % dofast == 0:
+                    if self.hold.check_error(read):
+                        break
+            if i % dofast != 0:
+                self.hold.check_error(read)
+        except OSError as e:
+            if str(e).startswith(file1error):
+                if self.fastq2 is None:
+                    self.hold.error = file1error
+                else:
+                    self.hold.read1.error = file1error
+            elif self.fastq2 is not None and str(e).startswith(file2error):
+                self.hold.read2.error = file2error
+            else:
+                raise
+        if self.fastq2 is not None:
+            self.hold.cal()
 
-    def check_file(self, filepath, readname):
-        """Check file is wrong compressed."""
-        if not filepath or not os.path.isfile(filepath):
-            return True
-        from check_compress import CheckCompress
-        if filepath.endswith(self.compressed):
-            cc = CheckCompress(filepath)
-            if not cc.check():
-                self.__dict__['%s_error' % (readname)] = \
-                        self.single_errors[5].format(cc.error)
-                return True
-        self.__dict__['%s_error' % (readname)] =  self.single_errors[6]
-        return True
-
-    def check_error(self):
-        """Check whether has error."""
-        errorlist = ['read1_error', 'read2_error', 'pair_error']
-        tag = False
-        for tmp in errorlist:
-            if hasattr(self, tmp) and getattr(self, tmp):
-                tag = True
-                break
-        return tag
-
-    def check_firstword(self, i, line, a):
-        """Check line [0] is a."""
-        error = ""
-        if line[0] != a:
-            error = self.single_errors[1].format(i, line, a)
-        return error
-
-    def check_lines(self, i, lines):
-        """Check lines."""
-        defi = (i + 1) % 4
-        if lines:
-            lines_notNone = len([x for x in lines if x is not None])
-            origread, readnames = [], []
-            errors = []
-            for j, line in enumerate(lines):
-                if line is None:
-                    continue
-                self.__dict__['%s_line_count' % self.pair[j]] += 1
-                length = len(line)
-                error = ''
-                if defi == 1:
-                    # single pair 检查是否“@”开头
-                    error = self.check_firstword(i, line, '@')
-                    self.__dict__['%s_line2_len' % self.pair[j]] = 0
-                    self.__dict__['%s_line4_len' % self.pair[j]] = 0
-                    if lines_notNone > 1:
-                        origread.append(line)
-                        # 针对某些BGI文件，文件名称如
-                        # “@CL100066606L2C001R002_528666#162_967_615/1
-                        #     1       1”
-                        readnametmp = line.split('\t')[0]
-                        if self.readname_normal.search(readnametmp):
-                            readnames.append(self.readname_normal.sub(
-                                '', readnametmp))
-                        elif self.readname_454.search(readnametmp):
-                            readnames.append(self.readname_454.sub(
-                                '', readnametmp))
-                        elif self.casava_1_8.search(readnametmp):
-                            match = self.casava_1_8.search(readnametmp)
-                            readnames.append(match.group(1))
-                        else:
-                            if i == 0:
-                                readfile = getattr(self, '%sfile' % self.pair[j])
-                                _logger.warning(
-                                    "New pattern readname:%s in file:%s!",
-                                    readnametmp, readfile)
-                            readnames.append(readnametmp)
-                elif defi == 2:
-                    # 计算read和base数目
-                    self.__dict__['%s_read_count' % self.pair[j]] += 1
-                    self.__dict__['%s_base_count' % self.pair[j]] += length
-                    # 获取每单元碱基长度
-                    self.__dict__['%s_line2_len' % self.pair[j]] = length
-                    line = line.upper()
-                    # 检查碱基是否为ATCGN，0123针对454测序
-                    if not set(line).issubset(set('ATCGN0123')):
-                        error = self.single_errors[0].format(i, line)
-                elif defi == 3:
-                    # 检查第三行是否为“+”开头
-                    error = self.check_firstword(i, line, '+')
-                elif defi == 0:
-                    # 获取质量值体系
-                    phredq = getattr(self, '%s_phredq' % self.pair[j])
-                    phredset = set(map(ord, line))
-                    amin = min(phredset)
-                    amax = max(phredset)
-                    if amin <= self.phredQ[0]:
-                        phredq = '33'
-                    elif amax >= self.phredQ[1]:
-                        phredq = '64'
-                    self.__dict__['%s_phredq' % self.pair[j]] = phredq
-                    # 检查质量值长度是否和碱基长度一致
-                    self.__dict__['%s_line4_len' % self.pair[j]] = length
-                    line2_len = getattr(
-                        self, '%s_line2_len' % self.pair[j])
-                    if line2_len != length:
-                        error = self.single_errors[2].format(
-                            length, line2_len, i)
-                    # 检查质量值是否在Phred范围33, 126
-                    if amin < self.phredrange[0] or amax > self.phredrange[1]:
-                        error = self.single_errors[4].format(
-                            amin, amax, self.phredrange, i)
-                if error:
-                    self.__dict__['%s_error' % self.pair[j]] = error
-                    errors.append(error)
-            if lines_notNone > 1:
-                if defi == 1:
-                    if len(set(readnames)) != 1:
-                        self.pair_error = self.pair_errors[0].format(
-                            origread[0], origread[1], i)
-            if any(errors) or (hasattr(self, 'pair_error') and
-                               self.pair_error):
-                return False
-        return True
-
-    def read_iter(self, iter1, iter2=None):
-        """Run function."""
-        iter_args = [iter1]
-        if iter2 is not None:
-            iter_args.append(iter2)
-            self.pair_error = ''
-        for i, lines in enumerate(zip_longest(*iter_args)):
-            if not self.check_lines(i, lines):
-                break
-        else:
-            if iter2 is not None:
-                # 检查read1和read2数目是否一致
-                if self.read1_read_count != self.read2_read_count:
-                    self.pair_error = self.pair_errors[1]
-            for read in self.pair:
-                # 检查行数是否为4的倍数
-                key = '%s_line_count' % read
-                if hasattr(self, key):
-                    value = getattr(self, key) % 4
-                    if value != 0:
-                        setattr(self, '%s_error' % read, self.single_errors[3])
-        if self.check_error():
-            return False
-        else:
-            # 获取总体的统计数据
-            total_stat = ['base_count', 'read_count', 'phredq']
-            for astat in total_stat:
-                for readname in self.pair:
-                    key = '%s_%s' % (readname, astat)
-                    if hasattr(self, key):
-                        attrtmp = getattr(self, key)
-                        if astat == 'phredq':
-                            if attrtmp:
-                                self.__dict__[astat] = attrtmp
-                        else:
-                            self.__dict__[astat] += attrtmp
-            return True
-
-
-def test():
-    """Test for module."""
-    import time
-    if len(sys.argv) < 2:
-        print('Usage: python {0} read1.fq.gz [read2.fq.gz]'.format(
-            sys.argv[0]))
-        sys.exit(0)
-    print('=' * 24)
-    print('start time:', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-    cf = CheckFastq()
-    cf.read_file(*sys.argv[1:])
-    print('-'*6, 'total statistics', '-'*6)
-    print('total base count:', cf.base_count)
-    print('total read count:', cf.read_count)
-    print('phred range:', cf.phredq)
-    single_info = ['base_count', 'read_count', 'error', 'phredq']
-    for read in cf.pair:
-        print('-'*6, read, 'information', '-'*6)
-        for tmp in single_info:
-            key = '%s_%s' % (read, tmp)
-            if hasattr(cf, key):
-                print('%s:%s' % (key, getattr(cf, key)))
-    if hasattr(cf, 'pair_error'):
-        print('-'*6, 'pair error', '-'*6)
-        print('pair error:', cf.pair_error)
-    print('end time:', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+    @lazypropery
+    def check_dict(self):
+        """Return dict."""
+        adict = deepcopy(self.header)
+        for key, value in adict.items():
+            if key.startswith(('file1_', 'file2_')):
+                if key.startswith('file1_'):
+                    key1 = key.replace('file1_', '')
+                    if self.fastq2 is None:
+                        adict[key] = getattr(self.hold, key1, value)
+                    else:
+                        adict[key] = getattr(self.hold.read1, key1, value)
+                else:
+                    if self.fastq2 is not None:
+                        key1 = key.replace('file2_', '')
+                        adict[key] = getattr(self.hold.read2, key1, value)
+            else:
+                adict[key] = getattr(self.hold, key, value)
+        return adict
 
 
 if __name__ == '__main__':
-    test()
+    import argparse
+    parser = argparse.ArgumentParser(__doc__)
+    parser.add_argument('fastq1', help='fastq1 path')
+    parser.add_argument('-f', '--fastq2', help='fastq2 path')
+    parser.add_argument('-r', '--run',
+                        help='run by times, default is %(default)s',
+                        default=1)
+    args = parser.parse_args()
+    print('='*20)
+    print('Start time:', time.asctime(time.localtime(time.time())))
+    checkfastq = CheckFastq(args.fastq1, args.fastq2, args.run)
+    print(checkfastq.check_dict)
+    print('End time:', time.asctime(time.localtime(time.time())))

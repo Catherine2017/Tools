@@ -35,15 +35,18 @@ class FileMD5(object):
             return True
 
 
-def md5sum(self, md5file):
+def md5sum(md5file):
     """Md5sum -c file."""
     md5, filename = ('',) * 2
     with open(md5file) as wt:
         for line in wt:
-            md5, filename = line.rstrip(os.linesep).strip().split('  ')[:2]
-            if md5:
-                break
-    if not md5:
-        raise ValueError("Can not find md5 information!")
-    filemd5 = FileMD5(filename)
-    return filemd5.md5check(md5)
+            if line.startswith("MD5"):
+                filename, md5 = line.split('=')
+                filename = filename.replace('MD5(', '').replace(')', '')
+            else:
+                md5, filename = line.split('  ')[:2]
+            md5 = md5.strip()
+            filename = filename.strip()
+            filemd5 = FileMD5(filename)
+            infor = 'succeed' if filemd5.md5check(md5) else 'fail'
+            print('{} md5 check: {}'.format(filename, infor))
