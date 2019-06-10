@@ -48,10 +48,12 @@ class ReadGgBz2Normal(object):
         """Return self."""
         return self
 
-    def __exit__(self, type, value, trace):
+    def __exit__(self, atype, value, trace):
         """Exit file hanlde."""
         if not hasattr(self, 'zcat'):
             self.handle.close()
+        else:
+            self.check_zcat_error()
 
     def __iter__(self):
         """Return file itertion."""
@@ -64,14 +66,12 @@ class ReadGgBz2Normal(object):
         except (OSError, IOError) as e:  # IOError is needed for 2.7
             # ignore decompression OK, trailing garbage ignored
             self.check_error(num, e)
-        if hasattr(self, 'zcat'):
-            self.check_zcat_error()
 
     def check_error(self, num, e):
         """Check read error."""
         if self.filename.endswith('.gz') and num <= 0 or not str(e).startswith(
                 'Not a gzipped file'):
-            raise
+            raise ValueError("Failed to read file %s!" % self.filename)
         _logger.warn('decompression OK, trailing garbage ignored')
 
     def check_zcat_error(self):
@@ -99,5 +99,3 @@ class ReadGgBz2Normal(object):
         except (OSError, IOError) as e:  # IOError is needed for 2.7
             # ignore decompression OK, trailing garbage ignored
             self.check_error(num, e)
-        if hasattr(self, 'zcat'):
-            self.check_zcat_error()
