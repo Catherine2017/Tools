@@ -1,32 +1,39 @@
+# -*- coding:utf-8 -*-
+
 """
 Description: Get base count and error for fastq file both single end and pair
              end sequencing.
 """
 
 from copy import deepcopy
-from itertools import zip_longest
+import itertools
 import logging
 import os
 import re
+import sys
 import time
 
 from read_gzbzfile import ReadGgBz2Normal
 
+if sys.version.startswith('3'):
+    zip_longest = itertools.zip_longest
+else:
+    zip_longest = itertools.izip_longest
 _logger = logging.getLogger(__name__)
 errors = {
-    'WB': 'The [{}] line:({}) have wrong base',
-    'NF': 'The [{}] line:({}) is not {}',
-    'DL': ('The 4th line length {} is not equal to the 2nd line length {}'
-           ' at 4th line [{}]'),
+    'WB': 'The [{0}] line:({1}) have wrong base',
+    'NF': 'The [{0}] line:({1}) is not {2}',
+    'DL': ('The 4th line length {0} is not equal to the 2nd line length {1}'
+           ' at 4th line [{2}]'),
     'OQ': ('The ord of qualiyty ({0[0]}-{0[1]}) is out of {1[0]}-{1[1]} at'
            ' line [{2}]'),
-    'RN': 'Read1 name ({}) is not same with read2 name ({}) at line [{}]',
-    'FF': "Failed to read file: {}",
+    'RN': 'Read1 name ({0}) is not same with read2 name ({1}) at line [{2}]',
+    'FF': "Failed to read file: {0}",
     'N4': r'The file don\'t have an integral multiple of 4 number of lines',
-    'NE': 'Read1 number is not equal to read2 number at line [{}].'}
+    'NE': 'Read1 number is not equal to read2 number at line [{0}].'}
 
 
-class lazypropery:
+class lazypropery(object):
     """Return value if exists."""
 
     def __init__(self, func):
@@ -48,29 +55,33 @@ class SingleRead(object):
 
     phredrange = (33, 126)
     phredQ = (58, 75)
-    readname_normal = re.compile(r'(\/[12])|(\.[fr])$')
-    casava_1_8 = re.compile(
-        r'^@([a-zA-Z0-9_-]+:\d+:[a-zA-Z0-9_-]+:\d+:\d+:[0-9-]+:'
-        r'[0-9-]+)(\s+|\:)([12]):[YN]:\d*[02468]:?([ACGTN\_\+\d+]*)$')
 
-    def __init__(self, number: int, lines4: list):
+    def __init__(self, number, lines4):
         """Init class."""
         # number: start from 0
         self.readnumber = number
         self.lines4 = lines4
 
     @lazypropery
-    def lines_len(self):
+    def check_len(self):
         """Get lines length."""
-        return len(self.lines4)
+        if self.lines4 is None or len(self.lines4) != 4:
+            return True
+        else:
+            return False
 
     @lazypropery
     def line2_len(self):
+        """Get line2 length."""
+        if self.check_len:
+            return 0
         return len(self.lines4[1])
 
     @lazypropery
     def phreds(self):
         """Get phred for read."""
+        if self.check_len:
+            return (59, 59)
         aset = set(map(ord, self.lines4[3]))
         phred_min = min(aset)
         phred_max = max(aset)
@@ -80,12 +91,12 @@ class SingleRead(object):
     def error(self):
         """Check error."""
         def check_first(linenum, line, first):
-            if line.startswith(first):
+            if line[0] == first:
                 return ""
             else:
                 return errors['NF'].format(linenum, line, first)
         # 检查是否为4的倍数
-        if self.lines_len != 4:
+        if self.check_len:
             return errors['N4']
         # 检查第二行是否为ATCG0123
         if not set(self.lines4[1].upper()).issubset(set('ATGCN0123')):
@@ -110,15 +121,11 @@ class SingleRead(object):
     @lazypropery
     def readname(self):
         """Get read name."""
-        readtmp1 = self.lines4[0].strip().split('\t')[0]
-        if self.readname_normal.search(readtmp1):
-            return self.readname_normal.sub('', readtmp1)
-        pattern = self.casava_1_8.search(readtmp1)
-        if pattern:
-            return pattern.group(1)
-        if self.readnumber == 0:
-            _logger.warning('New readname:%s', self.lines4[0])
-        return readtmp1.split()[0]
+        if self.check_len:
+            return ""
+        readname = self.lines4[0].strip().partition('\t')[0]\
+            .partition(" ")[0]
+        return readname
 
     @lazypropery
     def phreq_set(self):
@@ -133,17 +140,18 @@ class SingleRead(object):
     @lazypropery
     def base_count(self):
         """Get base count for read."""
-        if self.lines4 is None or self.lines_len != 4:
-            _logger.warning('Wrong base count for line %s!',
-                            self.readnumber*4+1)
-            return 0
         return self.line2_len
 
 
 class PairRead(object):
     """Get information for pair read."""
+    readname_normal = re.compile(r'(\/[12])|(\.[fr])$')
+    casava_1_8 = re.compile(
+        r'^@([a-zA-Z0-9_-]+:\d+:[a-zA-Z0-9_-]+:\d+:\d+:[0-9-]+:'
+        r'[0-9-]+)(\s+|\:)([12]):[YN]:\d*[02468]:?([ACGTN\_\+\d+]*)$')
 
-    def __init__(self, number: int, lines1: list, lines2: list):
+
+    def __init__(self, number, lines1, lines2):
         """Init class."""
         self.number = number
         self.linenum = self.number*4
@@ -152,6 +160,14 @@ class PairRead(object):
         self.read1 = SingleRead(number, lines1)
         self.read2 = SingleRead(number, lines2)
 
+    def get_com_name(self, string):
+        if self.readname_normal.search(string):
+            return self.readname_normal.sub('', string)
+        pattern = self.casava_1_8.search(string)
+        if pattern:
+            return pattern.group(1)
+        return string
+
     @lazypropery
     def pair_error(self):
         """Check pair error."""
@@ -159,7 +175,8 @@ class PairRead(object):
         if self.lines1 is None or self.lines2 is None:
             return errors['NE'].format(self.linenum)
         # 检查read1和read2的名称是否一致
-        if self.read1.readname != self.read2.readname:
+        if self.get_com_name(self.read1.readname) != self.get_com_name(
+                self.read2.readname):
             return errors['RN'].format(
                 self.read1.readname, self.read2.readname, self.linenum)
         return ""
@@ -249,8 +266,9 @@ class ReadFastq(object):
                         lines = []
                 if lines:
                     yield lines
-        except Exception:
-            raise OSError(errors['FF'].format(os.path.basename(
+        except Exception as e:
+            _logger.exception(e)
+            raise ValueError(errors['FF'].format(os.path.basename(
                 self.fastqfile)))
 
 
@@ -293,7 +311,7 @@ class CheckFastq(object):
                         break
             if i % dofast != 0:
                 self.hold.check_error(read)
-        except OSError as e:
+        except ValueError as e:
             if str(e).startswith(file1error):
                 if self.fastq2 is None:
                     self.hold.error = file1error
@@ -329,6 +347,7 @@ class CheckFastq(object):
 
 if __name__ == '__main__':
     import argparse
+    import json
     parser = argparse.ArgumentParser(__doc__)
     parser.add_argument('fastq1', help='fastq1 path')
     parser.add_argument('-f', '--fastq2', help='fastq2 path')
@@ -336,8 +355,14 @@ if __name__ == '__main__':
                         help='run by times, default is %(default)s',
                         default=1)
     args = parser.parse_args()
-    print('='*20)
-    print('Start time:', time.asctime(time.localtime(time.time())))
+    sys.stdout.write('='*20)
+    sys.stdout.write('\n')
+    sys.stdout.write('Start time: %s' % time.asctime(time.localtime(
+        time.time())))
+    sys.stdout.write('\n')
     checkfastq = CheckFastq(args.fastq1, args.fastq2, args.run)
-    print(checkfastq.check_dict)
-    print('End time:', time.asctime(time.localtime(time.time())))
+    sys.stdout.write('%s' % json.dumps(checkfastq.check_dict))
+    sys.stdout.write('\n')
+    sys.stdout.write('End time: %s' % time.asctime(time.localtime(
+        time.time())))
+    sys.stdout.write('\n')
