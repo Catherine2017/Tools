@@ -145,11 +145,11 @@ class SingleRead(object):
 
 class PairRead(object):
     """Get information for pair read."""
+
     readname_normal = re.compile(r'(\/[12])|(\.[fr])$')
     casava_1_8 = re.compile(
         r'^@([a-zA-Z0-9_-]+:\d+:[a-zA-Z0-9_-]+:\d+:\d+:[0-9-]+:'
         r'[0-9-]+)(\s+|\:)([12]):[YN]:\d*[02468]:?([ACGTN\_\+\d+]*)$')
-
 
     def __init__(self, number, lines1, lines2):
         """Init class."""
@@ -161,6 +161,7 @@ class PairRead(object):
         self.read2 = SingleRead(number, lines2)
 
     def get_com_name(self, string):
+        """Get common name for pair read."""
         if self.readname_normal.search(string):
             return self.readname_normal.sub('', string)
         pattern = self.casava_1_8.search(string)
@@ -244,34 +245,6 @@ class HoldPair(object):
         return False
 
 
-class ReadFastq(object):
-    """Read fastq and get read unit."""
-
-    def __init__(self, fastqfile):
-        """Init class."""
-        self.fastqfile = fastqfile
-        if not os.path.isfile(fastqfile):
-            raise ValueError("Can not find file %s!" % fastqfile)
-
-    def __iter__(self):
-        """Get lines."""
-        lines = []
-        try:
-            with ReadGgBz2Normal(self.fastqfile, 'rt') as rg:
-                for line in rg:
-                    line = line.rstrip(os.linesep)
-                    lines.append(line)
-                    if len(lines) >= 4:
-                        yield lines
-                        lines = []
-                if lines:
-                    yield lines
-        except Exception as e:
-            _logger.exception(e)
-            raise ValueError(errors['FF'].format(os.path.basename(
-                self.fastqfile)))
-
-
 class CheckFastq(object):
     """Check fastq file."""
 
@@ -288,18 +261,16 @@ class CheckFastq(object):
 
     def _run_fastq(self, dofast):
         """Run fastq."""
-        file1error = errors['FF'].format(os.path.basename(self.fastq1))
-        iters = [ReadFastq(self.fastq1)]
+        basename1 = os.path.basename(self.fastq1)
         if self.fastq2 is None:
             self.hold = HoldSingle()
         else:
             self.hold = HoldPair()
-            file2error = errors['FF'].format(os.path.basename(self.fastq2))
-            iters.append(ReadFastq(self.fastq2))
+            basename2 = os.path.basename(self.fastq2)
         try:
             i = 0
             read = None
-            for tmp in zip_longest(*iters):
+            for tmp in self.readfastq():
                 if len(tmp) == 2:
                     read = PairRead(i, tmp[0], tmp[1])
                 else:
@@ -312,17 +283,27 @@ class CheckFastq(object):
             if i % dofast != 0:
                 self.hold.check_error(read)
         except ValueError as e:
-            if str(e).startswith(file1error):
+            if str(e).endswith(basename1):
                 if self.fastq2 is None:
-                    self.hold.error = file1error
+                    self.hold.error = errors['FF'].format(basename1)
                 else:
-                    self.hold.read1.error = file1error
-            elif self.fastq2 is not None and str(e).startswith(file2error):
-                self.hold.read2.error = file2error
+                    self.hold.read1.error = errors['FF'].format(basename1)
+            elif self.fastq2 is not None and str(e).endswith(basename2):
+                self.hold.read2.error = errors['FF'].format(basename2)
             else:
                 raise
         if self.fastq2 is not None:
             self.hold.cal()
+
+    def readfastq(self):
+        """Read fastq file."""
+        if self.fastq2 is None:
+            with ReadGgBz2Normal(self.fastq1) as r1:
+                return zip_longest(r1.read_fastq())
+        else:
+            with ReadGgBz2Normal(self.fastq1) as r1, ReadGgBz2Normal(
+                    self.fastq2) as r2:
+                return zip_longest(r1.read_fastq(), r2.read_fastq())
 
     @lazypropery
     def check_dict(self):
@@ -354,15 +335,19 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--run',
                         help='run by times, default is %(default)s',
                         default=1)
+    parser.add_argument('-d', '--debug',
+                        help='debug, default is %(default)s',
+                        action='store_true')
     args = parser.parse_args()
-    sys.stdout.write('='*20)
-    sys.stdout.write('\n')
-    sys.stdout.write('Start time: %s' % time.asctime(time.localtime(
-        time.time())))
-    sys.stdout.write('\n')
+    level = logging.DEBUG if args.debug else logging.WARNING
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s-%(filename)s[line:%(lineno)d]-%(levelname)s:'
+               ' %(message)s')
+    logging.info('Start %s.', args.fastq1)
+    start = time.time()
     checkfastq = CheckFastq(args.fastq1, args.fastq2, args.run)
-    sys.stdout.write('%s' % json.dumps(checkfastq.check_dict))
-    sys.stdout.write('\n')
-    sys.stdout.write('End time: %s' % time.asctime(time.localtime(
-        time.time())))
-    sys.stdout.write('\n')
+    logging.info('Result: %s', json.dumps(checkfastq.check_dict))
+    end = time.time()
+    logging.info('Spend time:%s.', end-start)
+    logging.info('End.')
