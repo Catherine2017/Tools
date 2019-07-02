@@ -14,15 +14,15 @@
 ## Dir_File
 处理文件和目录的相应Python工具包。
 ### 解压文件
-1. 脚本路径：`./Dir_File/decompress.py`
+1. 脚本路径：`./script/decompress.py`
 2. 使用方法：
 ```
-python ./Dir_File/decompress.py infile outpath
+python ./script/decompress.py infile outpath
 ```
 3. 备注：目前仅支持解压\*.tar.gz, \*.gz, \*.zip, \*.tar, \*.rar文件。
 
 ### 测试压缩文件完整性
-1. 脚本路径：`./Dir_File/check_compress.py`
+1. 脚本路径：`./script/check_compress.py`
 2. 使用方法：
 ```
 CheckCompress:
@@ -31,7 +31,7 @@ CheckCompress:
 3. 备注：目前仅支持检查\*.gz, \*.zip, \*.bz2文件。
 
 ### 检查文件md5或者生成文件md5
-1. 脚本路径：`./Dir_File/file_md5.py`
+1. 脚本路径：`./script/file_md5.py`
 2. 使用方法：
 ```
 FileMD5:
@@ -40,7 +40,7 @@ FileMD5:
 md5sum: 检查文件的MD5是否和md5文件一致。
 ```
 ### 忽略“Ignore Gzip Trailing Garbage Data in Python”这种错误
-1. 脚本路径：`./Dir_File/altgzip.py`
+1. 脚本路径：`./script/altgzip.py`
 2. 使用方法：
 ```
 >>> import altgzip
@@ -53,7 +53,7 @@ decompression OK, trailing garbage ignored
 ```
 
 ### 读取gz和bz2压缩文件（gz文件能忽略“decompression OK, trailing garbage ignored”）
-1. 脚本路径：`./Dir_File/read_gzbzfile.py`
+1. 脚本路径：`./script/read_gzbzfile.py`
 2. 使用方法：
 ```
 >>> import ReadGgBz2
